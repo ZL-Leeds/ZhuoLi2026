@@ -1,0 +1,235 @@
+import numpy as np
+import xarray as xr
+import matplotlib.pyplot as plt
+from matplotlib.colors import BoundaryNorm
+import matplotlib.patches as mpatches
+
+# =========================================================
+# 洲 -> region_id
+# =========================================================
+continents = {
+    "Asia": [70,108,109,110,111,112,113,114,115,116,117,118,119,120,121,
+             122,123,124,125,126,127,130,133,135,136,137,138,139,140,141,
+             142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,
+             157,206,207,208,209,210,211,212,213,214,215,216,217,229,230,
+             231,235,236],
+
+    "Europe": [102,103,104,105,106,107,128,129,131,134,197,198,199,
+               200,201,202,203,204,205,234],
+
+    "Africa": [52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,
+               69,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,
+               87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,132,
+               225,226,227,228],
+
+    "North\nAmerica": list(range(0,32)) + [218,219,220,221,222,223,224,232],
+    "South\nAmerica": list(range(32,52)) + [191,192,193,194,195,196,233],
+    "Oceania": [158,159,160,161,162,163,164,165,166,167,168,169]
+}
+
+continent_names = list(continents.keys())
+
+# =========================================================
+# 时间段长度
+# =========================================================
+period_length = {
+    "1981-1990": 10,
+    "1991-2000": 10,
+    "2001-2010": 10,
+    "2011-2020": 10,
+    "2020-2024": 5
+}
+
+# =========================================================
+# bins
+# =========================================================
+bins = np.array([
+    0, 0.02, 0.05, 0.08, 0.10,
+    0.15, 0.20, 0.25, 0.30, 10
+])
+
+bin_labels = [
+    "0-2%", "2-5%", "5-8%", "8-10%",
+    "10-15%", "15-20%", "20-25%", "25-30%", ">30%"
+]
+
+# =========================================================
+# compute summary
+# =========================================================
+def compute_summary(count_file, prob_file, periods_to_use):
+
+    count_ds = xr.open_dataset(count_file)
+    prob_ds = xr.open_dataset(prob_file)
+
+    counts = count_ds["exceedance_count"]
+    probs = prob_ds["record_breaking_probability"]
+
+    periods = [p for p in prob_ds.period.values if p in periods_to_use]
+
+    sum_counts = np.zeros((len(continent_names), len(bin_labels)))
+    sum_region_years = np.zeros_like(sum_counts)
+
+    for p in periods:
+
+        p_length = period_length[p]
+
+        for ci, cont in enumerate(continent_names):
+
+            region_list = continents[cont]
+
+            cont_prob = probs.sel(region_id=region_list, period=p)
+            cont_count = counts.sel(region_id=region_list, period=p)
+
+            bin_index = np.digitize(cont_prob.values, bins) - 1
+
+            for bi in range(len(bin_labels)):
+
+                mask = bin_index == bi
+                n_bin_regions = mask.sum()
+
+                if n_bin_regions == 0:
+                    continue
+
+                total_count = cont_count.values[mask].sum()
+
+                sum_counts[ci, bi] += total_count
+                sum_region_years[ci, bi] += n_bin_regions * p_length
+
+    summary = sum_counts / sum_region_years
+    summary[sum_region_years == 0] = np.nan
+
+    return summary
+
+
+# =========================================================
+# run
+# =========================================================
+periods_to_use = [
+    "1981-1990",
+    "1991-2000",
+    "2001-2010",
+    "2011-2020",
+    "2020-2024"
+]
+
+summary_raw = compute_summary(
+    "Berkeley_record_exceedance_counts.nc",
+    "record_breaking_probability_by_region_and_period.nc",
+    periods_to_use
+)
+
+summary_detrended = compute_summary(
+    "Berkeley_record_exceedance_counts_detrended.nc",
+    "record_breaking_probability_by_region_and_period_detrended.nc",
+    periods_to_use
+)
+
+summary_enso = compute_summary(
+    "Role_of_ENSO/Berkeley_record_exceedance_counts_ENSO_removed_by_obs_from_OBS.nc",
+    "Role_of_ENSO/record_breaking_probability_removed_ENSO_each_ensemble_from_IFS_and_ENSO_obs_from_obs.nc",
+    periods_to_use
+)
+
+summary_diff_detrended = summary_detrended - summary_raw
+summary_diff_enso = summary_enso - summary_raw
+
+# =========================================================
+# levels
+# =========================================================
+levels = [0, 0.02, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]
+diff_levels = [-0.10,-0.08,-0.05,-0.02,-0.002,0.002,0.02,0.05,0.08,0.10]
+
+# =========================================================
+# plot
+# =========================================================
+fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+
+titles = ["Raw", "Detrended - Raw", "ENSO Removed - Raw"]
+data_list = [summary_raw, summary_diff_detrended, summary_diff_enso]
+panel_labels = ["(a)", "(b)", "(c)"]
+
+for i, ax in enumerate(axes):
+
+    data = data_list[i]
+    data_masked = np.ma.masked_invalid(data)
+
+    # =========================
+    # colormap
+    # =========================
+    if i == 0:
+        cmap = plt.get_cmap("YlOrBr", len(levels) - 1)
+        norm = BoundaryNorm(levels, cmap.N)
+        boundaries, ticks = levels, levels
+        label = r"Observed frequency ($\mathrm{yr^{-1}}$)"
+    else:
+        cmap = plt.get_cmap("RdBu_r", len(diff_levels) - 1)
+        norm = BoundaryNorm(diff_levels, cmap.N)
+        boundaries, ticks = diff_levels, diff_levels
+        label = "Difference"
+
+    im = ax.imshow(
+        data_masked,
+        aspect="auto",
+        cmap=cmap,
+        norm=norm
+    )
+
+    # =====================================================
+    # ⭐ NaN hatch overlay（关键修改）
+    # =====================================================
+    nan_mask = np.isnan(data)
+
+    for y in range(data.shape[0]):
+        for x in range(data.shape[1]):
+            if nan_mask[y, x]:
+
+                rect = mpatches.Rectangle(
+                    (x - 0.5, y - 0.5),
+                    1, 1,
+                    facecolor="none",
+                    edgecolor="gray",
+                    hatch="//",
+                    linewidth=0
+                )
+                ax.add_patch(rect)
+
+    # =====================================================
+    # axes
+    # =====================================================
+    ax.set_xticks(range(len(bin_labels)))
+    ax.set_xticklabels(bin_labels, rotation=45, fontsize=18)
+
+    ax.set_yticks(range(len(continent_names)))
+    ax.set_yticklabels(continent_names, fontsize=18)
+
+    ax.set_title(titles[i], fontsize=22)
+
+    ax.text(
+        -0.20, 1.01, panel_labels[i],
+        transform=ax.transAxes,
+        fontsize=24,
+        fontweight="bold"
+    )
+
+    # =====================================================
+    # colorbar
+    # =====================================================
+    cbar = plt.colorbar(
+        im,
+        ax=ax,
+        boundaries=boundaries,
+        ticks=ticks
+    )
+
+    cbar.set_label(label, fontsize=18)
+    cbar.ax.tick_params(labelsize=16)
+
+plt.tight_layout()
+
+plt.savefig(
+    "Fig5_continent_probability_3panels_nan_hatch.pdf",
+    dpi=300,
+    bbox_inches="tight"
+)
+
+plt.show()
