@@ -1,5 +1,5 @@
 # 2026 code for manuscript
-Code for "Drivers of population exposure to record breaking warm season heat since 1980"
+Code for "Warming and record renewal shape the risk of unprecedented warm months"
 
 File "Plot the figure" includes all code to plotting the figurein main.
 
