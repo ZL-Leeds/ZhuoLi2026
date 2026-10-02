@@ -1,5 +1,5 @@
 # 2026 code for manuscript
-Code for "Warming and record renewal shape the risk of unprecedented warm months"
+Code for "Risk of unprecedented warm months controlled by warming rate, record margin and internal variability"
 
 File "Plot the figure" includes all code to plotting the figurein main.
 
